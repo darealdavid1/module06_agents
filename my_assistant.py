@@ -7,9 +7,11 @@ ESCALATION_KEYWORDS = ["book", "cancel", "reschedule", "urgent"]
 class AppointmentAssistant:
     """Assistant managing appointment slot queries."""
 
-    def __init__(self, name, schedule_tool):
+    def __init__(self, name, instructions, schedule_tool, model):
         self.name = name
+        self.instructions = instructions
         self.schedule_tool = schedule_tool
+        self.model = model
         self.history = []
 
     def respond(self, user_message):
@@ -20,12 +22,12 @@ class AppointmentAssistant:
 
     def choose_reply(self, user_message):
         text = user_message.lower()
+
+        # 1. Handoff rules
         if any(word in text for word in ESCALATION_KEYWORDS):
-            return (
-                "I can't change the schedule. I'm passing you to the front desk."
-            )
-        if "hello" in text:
-            return f"Hello! I'm {self.name}. Ask me which times are open on a day."
+            return "I can't change the schedule. I'm passing you to the front desk."
+
+        # 2. Tool rules
         if (
             "open" in text
             or "available" in text
@@ -39,4 +41,13 @@ class AppointmentAssistant:
             if slots:
                 return f"Open times on {day.lower()}: {', '.join(slots)}."
             return f"There are no open times on {day}."
-        return "I'm not sure how to help with that. I can list open times."
+
+        # 3. Model fallback (handles greetings and unexpected questions)
+        return self.model_reply()
+
+    def model_reply(self):
+        """Ask the model for a reply. Give a safe answer if the model has none."""
+        reply = self.model.reply(self.instructions, self.history)
+        if reply is None:
+            return "Sorry, I can't answer that right now. Please try again later."
+        return reply
