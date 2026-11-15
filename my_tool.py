@@ -7,6 +7,7 @@ class AppointmentLookup:
 
     def __init__(self, schedule):
         self.schedule = schedule
+        self.bookings = 0
 
     def find_day(self, text):
         """Return the day mentioned in the user message, or None."""
@@ -17,5 +18,19 @@ class AppointmentLookup:
         return None
 
     def get_open_slots(self, day):
-        """Return available time slots for a given day, or None."""
-        return self.schedule.get(day, None)
+        """Look up the open times on a specific day.
+
+        Args:
+            day: The day to check, like Monday.
+        """
+        found = self.find_day(day)
+        if found is None:
+            return "Which day? I can check Monday, Wednesday, or Friday."
+        slots = self.schedule.get(found, [])
+        if slots:
+            return f"Open times on {found.lower()}: {', '.join(slots)}."
+        return f"There are no open times on {found}."
+
+    def book_appointment(self, day, time):
+        """Record an approved booking."""
+        self.bookings += 1

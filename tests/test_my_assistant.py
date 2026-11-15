@@ -1,58 +1,51 @@
-# tests/test_my_assistant.py
-
-from mock_model import MockModel
+from booking_queue import BookingQueue
+from fake_model import FakeModel
 from my_assistant import AppointmentAssistant
 from my_tool import AppointmentLookup
+from my_toolbox import MyToolbox
 
 
-class SilentModel:
-    """A model that never has an answer. It stands in for Ollama being switched off."""
-
-    def reply(self, instructions, history):
-        return None
-
-
-def make_bot():
-    """Build a fresh assistant with its own tools and a mock model for each test."""
+def make_bot(model):
     tool = AppointmentLookup({"Monday": ["9:00 am", "2:30 pm"]})
-    return AppointmentAssistant("Robin", "Be helpful.", tool, MockModel())
+    queue = BookingQueue(tool)
+    tools = MyToolbox(tool, queue)
+    return AppointmentAssistant("Robin", "Be helpful.", tools, model)
 
 
-def make_bot_with_silent_model():
-    """Build an assistant whose model never answers."""
-    tool = AppointmentLookup({"Monday": ["9:00 am", "2:30 pm"]})
-    return AppointmentAssistant("Robin", "Be helpful.", tool, SilentModel())
+def ask_for_tool(name, arguments):
+    return {"tool": name, "arguments": arguments}
 
 
-def test_tool_retrieves_slots():
-    tool = AppointmentLookup({"Monday": ["9:00 am"]})
-    assert tool.get_open_slots("Monday") == ["9:00 am"]
+def test_handoff_happens():
+    bot = make_bot(FakeModel([]))
+    assert "front desk" in bot.respond("Please cancel my appointment")
 
 
-def test_valid_day_query():
-    bot = make_bot()
-    reply = bot.respond("What times are open on Monday?")
-    assert "9:00 am" in reply
+def test_made_up_detail_is_refused():
+    model = FakeModel(
+        [
+            ask_for_tool(
+                "request_booking",
+                {"day": "Monday", "time": "9:00 am", "client_name": "Bob"},
+            ),
+            {"text": "What is your name?"},
+        ]
+    )
+    bot = make_bot(model)
+    bot.respond("Book Monday at 9:00 am")
+    assert "has not provided their name" in bot.history[1]["content"]
 
 
-def test_missing_day_prompts_user():
-    bot = make_bot()
-    reply = bot.respond("What is available?")
-    assert "Which day?" in reply
-
-
-def test_booking_escalates_to_human():
-    bot = make_bot()
-    reply = bot.respond("Please book me for Monday at 9")
-    assert "front desk" in reply
-
-
-def test_unsupported_query_safe_reply():
-    bot = make_bot()
-    reply = bot.respond("Do you validate parking?")
-    assert "not sure" in reply
-
-
-def test_safe_reply_when_the_model_has_no_answer():
-    bot = make_bot_with_silent_model()
-    assert "try again" in bot.respond("hello")
+def test_request_waits_in_queue():
+    model = FakeModel(
+        [
+            ask_for_tool(
+                "request_booking",
+                {"day": "Monday", "time": "9:00 am", "client_name": "Dana Cruz"},
+            ),
+            {"text": "Sent to front desk."},
+        ]
+    )
+    bot = make_bot(model)
+    bot.respond("My name is Dana Cruz, book Monday at 9:00 am")
+    assert len(bot.tools.booking_queue.waiting()) == 1

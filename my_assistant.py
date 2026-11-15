@@ -1,16 +1,17 @@
 # my_assistant.py
 # Author: David Leatherman
 
-ESCALATION_KEYWORDS = ["book", "cancel", "reschedule", "urgent"]
+HANDOFF_WORDS = ["cancel", "reschedule", "urgent"]
+MAX_TOOL_ROUNDS = 3
 
 
 class AppointmentAssistant:
     """Assistant managing appointment slot queries."""
 
-    def __init__(self, name, instructions, schedule_tool, model):
+    def __init__(self, name, instructions, tools, model):
         self.name = name
         self.instructions = instructions
-        self.schedule_tool = schedule_tool
+        self.tools = tools
         self.model = model
         self.history = []
 
@@ -22,32 +23,39 @@ class AppointmentAssistant:
 
     def choose_reply(self, user_message):
         text = user_message.lower()
-
-        # 1. Handoff rules
-        if any(word in text for word in ESCALATION_KEYWORDS):
-            return "I can't change the schedule. I'm passing you to the front desk."
-
-        # 2. Tool rules
-        if (
-            "open" in text
-            or "available" in text
-            or "times" in text
-            or "schedule" in text
-        ):
-            day = self.schedule_tool.find_day(user_message)
-            if day is None:
-                return "Which day? I can check Monday, Wednesday, or Friday."
-            slots = self.schedule_tool.get_open_slots(day)
-            if slots:
-                return f"Open times on {day.lower()}: {', '.join(slots)}."
-            return f"There are no open times on {day}."
-
-        # 3. Model fallback (handles greetings and unexpected questions)
+        if self.needs_human(text):
+            return "I can't change a booking. I'm passing you to the front desk."
         return self.model_reply()
 
+    def needs_human(self, text):
+        for word in HANDOFF_WORDS:
+            if word in text:
+                return True
+        return False
+
     def model_reply(self):
-        """Ask the model for a reply. Give a safe answer if the model has none."""
-        reply = self.model.reply(self.instructions, self.history)
-        if reply is None:
-            return "Sorry, I can't answer that right now. Please try again later."
-        return reply
+        rounds = 0
+        while rounds < MAX_TOOL_ROUNDS:
+            tool_list = self.tools.tool_list()
+            decision = self.model.decide(self.instructions, self.history, tool_list)
+
+            if decision is None:
+                return "Sorry, I can't answer that right now. Please try again later."
+
+            if "text" in decision:
+                return decision["text"]
+
+            name = decision["tool"]
+            arguments = decision["arguments"]
+            result = self.tools.run(name, arguments, self.history)
+
+            self.history.append(
+                {
+                    "role": "tool",
+                    "tool_name": name,
+                    "arguments": arguments,
+                    "content": result,
+                }
+            )
+            rounds += 1
+        return "Sorry, I couldn't finish that. I'm passing you to the front desk."
